@@ -1,69 +1,203 @@
-import Head from 'next/head'
-import Image from 'next/image'
-import styles from '../styles/Home.module.css'
+import { useState, useEffect } from "react";
+import { ethers } from "ethers";
+import Artifacts from "../artifacts/contracts/Lottery.sol/Lottery.json";
+const contractAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
 
-export default function Home() {
+const Main = () => {
+  const [signer, setSigner] = useState(null);
+  const [metamaskConnected, setMetamaskConnected] = useState(false);
+  const [contractInfo, setContractInfo] = useState({
+    minAmount: null,
+    contractBalance: null,
+    owner: "",
+  });
+  const [contract, setContract] = useState();
+  const [amountDonated, setAmountDonated] = useState(null);
+  const [currentAccount, setCurrentAccount] = useState("");
+  const [currentNetworkId, setCurrentNetworkId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [load, setLoad] = useState(false);
+
+  //default
+  useEffect(() => {
+    firstFunc();
+    checkMetamaskStatus();
+  }, []);
+
+  // for updating contract info-
+  useEffect(() => {
+    getContractData(signer);
+    listenToEvents();
+  }, [signer, currentAccount, contract, load]);
+
+  const firstFunc = async () => {
+    const provider = new ethers.providers.Web3Provider(window.ethereum);
+    const _signer = await provider.getSigner();
+    const _currentNetworkId = window.ethereum.networkVersion;
+    setCurrentNetworkId(_currentNetworkId);
+    setSigner(_signer);
+    const accounts = await provider.listAccounts();
+    if (accounts.length > 0) {
+      setCurrentAccount(accounts[0]);
+      setMetamaskConnected(true);
+    } else {
+      setMetamaskConnected(false);
+    }
+    await initialiseContract(_signer);
+  };
+
+  const checkMetamaskStatus = () => {
+    const accountChanged = (accounts) => {
+      setCurrentAccount(accounts[0]);
+      console.log(accounts[0], "account changed");
+      if (!accounts.length) {
+        setMetamaskConnected(false);
+      }
+    };
+    const disconnectAccount = () => {
+      setCurrentAccount("");
+      console.log("disconnected account");
+      setMetamaskConnected(false);
+    };
+    const connected = async () => {
+      const changedAccounts = await window.ethereum.request({
+        method: "eth_requestAccounts",
+      });
+      setCurrentAccount(changedAccounts[0]);
+      console.log("connected");
+      setMetamaskConnected(true);
+    };
+    const chainChainged = (chain) => {
+      const _currentNetworkId = parseInt(chain, 16);
+      setCurrentNetworkId(_currentNetworkId);
+    };
+    window.ethereum.on("disconnect", disconnectAccount);
+    window.ethereum.on("accountsChanged", accountChanged);
+    window.ethereum.on("connect", connected);
+    window.ethereum.on("chainChanged", chainChainged);
+    return () => {
+      window.ethereum.off("disconnect", disconnectAccount);
+      window.ethereum.off("accountsChanged", accountChanged);
+      window.ethereum.off("connect", connected);
+      window.ethereum.off("chainChanged", chainChainged);
+    };
+  };
+
+  const connectMetamask = async () => {
+    await window.ethereum
+      .request({ method: "eth_requestAccounts" })
+      .then((_) => setMetamaskConnected(true))
+      .catch((err) => {
+        console.log(err);
+        setMetamaskConnected(false);
+      });
+  };
+
+  const getContractData = async () => {
+    if (contract) {
+      let minAmount = await contract.minAmount();
+      minAmount = parseInt(minAmount._hex, 16);
+      let contractBalance = await contract.contractBalance();
+      contractBalance = parseInt(contractBalance._hex, 16);
+      const owner = await contract.getOwner();
+      const _contractInfo = { contractBalance, minAmount, owner };
+      setContractInfo(_contractInfo);
+      console.log(currentAccount, "current account");
+      let _amountDonated = await contract.getDonatedAmount(currentAccount);
+      _amountDonated = parseInt(_amountDonated._hex, 16);
+      setAmountDonated(_amountDonated);
+    }
+  };
+
+  const initialiseContract = async (_signer) => {
+    const _contract = new ethers.Contract(
+      contractAddress,
+      Artifacts.abi,
+      _signer
+    );
+    setContract(_contract);
+    getContractData();
+  };
+
+  const handleDonate = async () => {
+    if (!amount) {
+      return alert("Fill text value !!");
+    }
+    if (!contract) {
+      return alert("Contract not connected !!");
+    }
+    // await window.ethereum.request({ method: "eth_requestAccounts" });
+    const tx = await contract.donate(currentAccount, parseInt(amount), {
+      value: amount,
+    });
+    await tx.wait();
+    setLoad(!load);
+  };
+
+  const declareWinner = async () => {
+    if (!contract) {
+      return alert("Contract not connected !!");
+    }
+
+    const randomVal = Math.floor(Math.random() * 100);
+    const tx = await contract.declareWinner(randomVal);
+    tx.wait();
+    setLoad(!load);
+  };
+
+  const listenToEvents = async () => {
+    const winnerDeclaration = (winner, amount, msg) => {
+      alert(
+        `${winner} is the winner, ${amount} has been send to their account !!`
+      );
+    };
+
+    const donatedAmount = (from, amount, msg) => {
+      alert(`${from} donated ${amount} !!`);
+    };
+
+    if (contract) {
+      contract.on("WinnerDeclaration", winnerDeclaration);
+      contract.on("DonationSuccessful", donatedAmount);
+
+      return () => {
+        contract.off("WinnerDeclaration", winnerDeclaration);
+        contract.off("DonationSuccessful", donatedAmount);
+      };
+    }
+  };
+
   return (
-    <div className={styles.container}>
-      <Head>
-        <title>Create Next App</title>
-        <meta name="description" content="Generated by create next app" />
-        <link rel="icon" href="/favicon.ico" />
-      </Head>
-
-      <main className={styles.main}>
-        <h1 className={styles.title}>
-          Welcome to <a href="https://nextjs.org">Next.js!</a>
-        </h1>
-
-        <p className={styles.description}>
-          Get started by editing{' '}
-          <code className={styles.code}>pages/index.js</code>
-        </p>
-
-        <div className={styles.grid}>
-          <a href="https://nextjs.org/docs" className={styles.card}>
-            <h2>Documentation &rarr;</h2>
-            <p>Find in-depth information about Next.js features and API.</p>
-          </a>
-
-          <a href="https://nextjs.org/learn" className={styles.card}>
-            <h2>Learn &rarr;</h2>
-            <p>Learn about Next.js in an interactive course with quizzes!</p>
-          </a>
-
-          <a
-            href="https://github.com/vercel/next.js/tree/canary/examples"
-            className={styles.card}
-          >
-            <h2>Examples &rarr;</h2>
-            <p>Discover and deploy boilerplate example Next.js projects.</p>
-          </a>
-
-          <a
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=default-template&utm_campaign=create-next-app"
-            className={styles.card}
-          >
-            <h2>Deploy &rarr;</h2>
-            <p>
-              Instantly deploy your Next.js site to a public URL with Vercel.
-            </p>
-          </a>
-        </div>
-      </main>
-
-      <footer className={styles.footer}>
-        <a
-          href="https://vercel.com?utm_source=create-next-app&utm_medium=default-template&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Powered by{' '}
-          <span className={styles.logo}>
-            <Image src="/vercel.svg" alt="Vercel Logo" width={72} height={16} />
-          </span>
-        </a>
-      </footer>
+    <div>
+      <button onClick={connectMetamask}>Connect Metamask</button>
+      {`${metamaskConnected}`}
+      {currentAccount}
+      <br />
+      {`Current network id: ${currentNetworkId}`}
+      <br />
+      <h3>Contract Info</h3>
+      <span>Contract address: {contractAddress}</span>
+      <br />
+      Balance: <b>{contractInfo.contractBalance}</b>
+      <br />
+      Min donation amount: <b>{contractInfo.minAmount}</b>
+      <br />
+      Amount Donated by {currentAccount}: {amountDonated}
+      <hr />
+      <input
+        value={amount}
+        onChange={(e) => {
+          setAmount(e.target.value);
+        }}
+        type="number"
+      />
+      <button onClick={handleDonate}>Donate</button>
+      <hr />
+      {contractInfo.owner === currentAccount && (
+        <button onClick={declareWinner}>Declare Winner</button>
+      )}
     </div>
-  )
-}
+  );
+};
+
+export default Main;
